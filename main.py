@@ -19,15 +19,18 @@ app = FastAPI()
 ERROR = "error"
 
 
-def preprocess_image(image_path):
+def preprocess_image(image_path, thresh):
     image = cv2.imread(image_path)
 
     # Convert the image to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    _, binary_image = cv2.threshold(gray, 235, 255, cv2.THRESH_BINARY)
+    _, binary_image = cv2.threshold(gray, thresh, 255, cv2.THRESH_BINARY)
 
-    cv2.imwrite(image_path, binary_image)
+    new_path = generate_random_name() + ".jpg"
+    cv2.imwrite(new_path, binary_image)
+
+    return new_path
 
 
 def generate_random_name():
@@ -63,30 +66,33 @@ async def process_image(image_url: str):
     if image_path == ERROR:
         raise HTTPException(status_code=400, detail="Image download failed")
 
-    preprocess_image(image_path)
+    for trash in (35, 235):
+        print(f"Trash {trash}")
+        result_path = preprocess_image(image_path, trash)
 
-    custom_config = "--oem 3 --psm 6"
-    data = pytesseract.image_to_data(image_path, lang="chi_tra", config=custom_config, output_type=pytesseract.Output.DICT)
+        custom_config = "--oem 3 --psm 11"
+        data = pytesseract.image_to_data(result_path, lang="chi_sim", config=custom_config, output_type=pytesseract.Output.DICT)
+        os.remove(result_path)
+        # print(data)
 
-    # print(data)
+        cnt = 0
+        for i in range(len(data['text'])):
+            # print(row)
+            if not filter_chinese_text(data["text"][i]):
+                continue
 
-    # os.remove(image_path)
+            confidence = data['conf'][i]
+            print(confidence, data["text"][i])
 
-    cnt = 0
-    for i in range(len(data['text'])):
-        # print(row)
-        if not filter_chinese_text(data["text"][i]):
-            continue
+            if confidence >= 90:
+                cnt += len(list("".join(data["text"][i].split())))
 
-        confidence = data['conf'][i]
-        print(confidence, data["text"][i])
+        print(f"Cnt: {cnt}")
+        if cnt >= 3:
+            os.remove(image_path)
+            return False
 
-        if confidence > 85:
-            cnt += 1
-
-            if cnt >= 3:
-                return False
-
+    os.remove(image_path)
     return True
 
 
