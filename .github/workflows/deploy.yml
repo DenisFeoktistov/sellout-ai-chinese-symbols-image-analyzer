@@ -1,0 +1,57 @@
+name: build-push-deploy
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: cr.yandex
+  REGISTRY_ID: crp49skgk9ou0o8ephqa
+  IMAGE_NAME: sellout-ai-chinese-symbols-image-analyzer
+  SERVICE_NAME: sellout-ai-chinese-symbols-image-analyzer
+  STACK_NAME: sellout
+
+jobs:
+  build-push-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute short SHA
+        id: sha
+        run: echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to Yandex Container Registry
+        run: |
+          echo '${{ secrets.YC_SA_JSON }}' | docker login \
+            --username json_key --password-stdin ${{ env.REGISTRY }}
+
+      - name: Build image
+        run: |
+          docker build \
+            -t ${{ env.REGISTRY }}/${{ env.REGISTRY_ID }}/${{ env.IMAGE_NAME }}:${{ steps.sha.outputs.sha }} \
+            -t ${{ env.REGISTRY }}/${{ env.REGISTRY_ID }}/${{ env.IMAGE_NAME }}:latest \
+            .
+
+      - name: Push image
+        run: |
+          docker push ${{ env.REGISTRY }}/${{ env.REGISTRY_ID }}/${{ env.IMAGE_NAME }}:${{ steps.sha.outputs.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.REGISTRY_ID }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Prepare SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Rolling update on Swarm
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "docker service update --with-registry-auth \
+               --image ${{ env.REGISTRY }}/${{ env.REGISTRY_ID }}/${{ env.IMAGE_NAME }}:${{ steps.sha.outputs.sha }} \
+               ${{ env.STACK_NAME }}_${{ env.SERVICE_NAME }}"
