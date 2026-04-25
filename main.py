@@ -19,6 +19,11 @@ app = FastAPI()
 ERROR = "error"
 
 
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
 def preprocess_image(image_path, thresh):
     image = cv2.imread(image_path)
 
